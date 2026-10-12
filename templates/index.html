@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP-NOW Helmet Dashboard</title>
+<style>
+:root{font-family:Inter,Segoe UI,Arial,sans-serif;color:#eaf0f8;background:#0b1020}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top right,#172746,#0b1020 55%);min-height:100vh}
+header{padding:28px 5vw 18px;border-bottom:1px solid #28344b;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+h1{font-size:clamp(22px,3vw,34px);margin:0 0 7px}p{color:#9eacc3;margin:0}
+.pill{padding:8px 12px;border-radius:99px;background:#29354b;font-size:13px}
+main{padding:26px 5vw 50px;max-width:1500px;margin:auto}
+.notice{padding:12px 15px;border:1px solid #35415a;border-radius:12px;background:#111a2e;color:#b9c8df;margin-bottom:20px;font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+.card{border:1px solid #2a3650;background:rgba(18,27,47,.9);border-radius:16px;padding:18px;min-height:120px;box-shadow:0 12px 30px #0002}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:#94a6c2;margin-bottom:12px}
+.value{font-size:25px;font-weight:700;overflow-wrap:anywhere}
+.sub{font-size:12px;color:#8294af;margin-top:8px}
+.section{margin:26px 0 12px;font-size:17px}
+.panel{border:1px solid #2a3650;background:#10192b;border-radius:16px;padding:16px;overflow:auto}
+pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#bfe3ff;font:13px/1.6 Consolas,monospace}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:left;padding:10px;border-bottom:1px solid #29354b;vertical-align:top}th{color:#94a6c2}
+.ok{color:#58e0a3}.bad{color:#ff7b85}.muted{color:#94a6c2}
+footer{padding:0 5vw 30px;color:#71819b;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>ESP-NOW Helmet Dashboard</h1><p>Live data from ESP32 receiver over USB serial</p></div>
+  <div id="connection" class="pill">Connecting…</div>
+</header>
+<main>
+  <div class="notice">Keep the ESP32 receiver connected to <b>COM19</b> at <b>115200 baud</b>. Close Arduino IDE Serial Monitor before starting this dashboard because only one program can normally own the COM port at a time.</div>
+  <div class="grid">
+    <div class="card"><div class="label">Hall / Reed</div><div id="hall" class="value">—</div><div class="sub">Helmet strap state</div></div>
+    <div class="card"><div class="label">IR Sensor</div><div id="ir" class="value">—</div><div class="sub">Presence / detection state</div></div>
+    <div class="card"><div class="label">MQ-3 Raw</div><div id="mq3" class="value">—</div><div class="sub">Raw ADC reading, not calibrated alcohol concentration</div></div>
+    <div class="card"><div class="label">MQ-3 Voltage</div><div id="voltage" class="value">—</div><div class="sub">Approximate ADC pin voltage</div></div>
+    <div class="card"><div class="label">Green LED</div><div id="green" class="value">—</div></div>
+    <div class="card"><div class="label">Red LED</div><div id="red" class="value">—</div></div>
+    <div class="card"><div class="label">Buzzer</div><div id="buzzer" class="value">—</div></div>
+    <div class="card"><div class="label">Relay</div><div id="relay" class="value">—</div></div>
+  </div>
+  <h2 class="section">Latest serial message</h2>
+  <div class="panel"><pre id="raw">Waiting for ESP32 data…</pre></div>
+  <h2 class="section">All latest fields</h2>
+  <div class="panel"><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody id="fields"><tr><td colspan="2" class="muted">Waiting for data…</td></tr></tbody></table></div>
+  <p id="updated" class="sub" style="margin-top:14px">Last update: —</p>
+</main>
+<footer>Local-only prototype dashboard. The browser reads from this PC's local Python server; no cloud service is required.</footer>
+<script>
+const aliases = {
+ hall: ["hallDetected","hall","Hall","Hall/Reed"],
+ ir: ["irDetected","ir","IR"],
+ mq3: ["mq3Raw","mq3","MQ3 raw","mq3_raw"],
+ voltage: ["mq3Voltage","mq3VoltageV","ADC V","mq3_voltage"],
+ green: ["greenLed","green","Green","Green LED"],
+ red: ["redLed","red","Red","Red LED"],
+ buzzer: ["buzzerOn","buzzer","Buzzer"],
+ relay: ["relayOn","relay","Relay"]
+};
+function findVal(obj, keys) {
+  for (const k of keys) if (obj && Object.prototype.hasOwnProperty.call(obj,k)) return obj[k];
+  const lower = Object.fromEntries(Object.entries(obj||{}).map(([k,v])=>[k.toLowerCase(),v]));
+  for (const k of keys) if (Object.prototype.hasOwnProperty.call(lower,k.toLowerCase())) return lower[k.toLowerCase()];
+  return "—";
+}
+function show(v){ if(typeof v==="boolean") return v ? "ON / TRUE" : "OFF / FALSE"; return String(v ?? "—");}
+function setText(id,v){document.getElementById(id).textContent=show(v);}
+async function refresh(){
+ try{
+  const r=await fetch('/api/data',{cache:'no-store'});
+  const s=await r.json();
+  const badge=document.getElementById('connection');
+  badge.textContent=s.connected ? `Connected · ${s.port}` : `Waiting for ${s.port}`;
+  badge.className='pill '+(s.connected?'ok':'bad');
+  const d=s.latest||{};
+  setText('hall',findVal(d,aliases.hall));setText('ir',findVal(d,aliases.ir));
+  setText('mq3',findVal(d,aliases.mq3));setText('voltage',findVal(d,aliases.voltage));
+  setText('green',findVal(d,aliases.green));setText('red',findVal(d,aliases.red));
+  setText('buzzer',findVal(d,aliases.buzzer));setText('relay',findVal(d,aliases.relay));
+  document.getElementById('raw').textContent=s.raw || s.error || 'Waiting for serial data…';
+  document.getElementById('updated').textContent='Last update: '+(s.last_update||'—')+(s.error?' · '+s.error:'');
+  const rows=Object.entries(d);
+  document.getElementById('fields').innerHTML=rows.length?rows.map(([k,v])=>`<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(typeof v==='object'?JSON.stringify(v):String(v))}</td></tr>`).join(''):'<tr><td colspan="2" class="muted">Waiting for data…</td></tr>';
+ }catch(e){document.getElementById('connection').textContent='Dashboard API error';document.getElementById('raw').textContent=String(e)}
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+refresh();setInterval(refresh,1000);
+</script>
+</body>
+</html>
